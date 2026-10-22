@@ -1,6 +1,7 @@
 node_modules/
 exports/
 .cache/
+coverage/
 
 # Plan is part of this lab's submission (overrides the root rule)
 !PLAN.md
