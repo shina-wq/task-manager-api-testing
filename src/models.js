@@ -100,8 +100,8 @@ export class PriorityTask extends Task {
   }
 
   toString() {
-    const due = this.dueDate?.toISOString().slice(0, 10) ?? 'no due date';
-    return `${super.toString()} (${this.priority}, due ${due})`;
+    const due = this.dueDate ? `due ${this.dueDate.toISOString().slice(0, 10)}` : 'no due date';
+    return `${super.toString()} (${this.priority}, ${due})`;
   }
 }
 
