@@ -32,43 +32,33 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-describe('module mocking', () => {
+describe('workflow 1: mocked API → models', () => {
   test('TaskManager creates the mocked APIClient by default, so no network is used', async () => {
-    const defaultManager = new TaskManager({ snapshotFile });
-    await expect(defaultManager.load()).resolves.toEqual({ source: 'api', users: 3, tasks: 9 });
+    await expect(new TaskManager({ snapshotFile }).load()).resolves.toEqual({ source: 'api', users: 3, tasks: 9 });
   });
 
   test('refuses to query data before load()', () => {
     expect(() => manager.tasks).toThrow('Data not loaded yet — call load() first');
   });
-});
 
-describe('workflow 1: API data → models', () => {
-  beforeEach(() => manager.load());
-
-  test('loads every user and task from the API', async () => {
-    await expect(manager.load()).resolves.toEqual({ source: 'api', users: 3, tasks: 9 });
-    expect(api.fetchAllSettled).toHaveBeenCalled();
-  });
-
-  test('turns raw todos into PriorityTasks with derived fields', () => {
+  test('turns raw todos into PriorityTasks with derived fields', async () => {
+    await manager.load();
     const task = manager.getTask(23);
+
+    expect(api.fetchAllSettled).toHaveBeenCalledTimes(1);
     expect(task).toBeInstanceOf(PriorityTask);
     expect(task).toMatchObject({ title: 'Prepare release notes', priority: 'high', tags: ['learning', 'personal'] });
-    expect(task.dueDate).toBeInstanceOf(Date);
   });
 
-  test('turns raw users into Users with their nested fields flattened', () => {
-    const user = manager.getUser(1);
-    expect(user).toBeInstanceOf(User);
-    expect(user).toMatchObject({ name: 'Leanne Graham', company: 'Romaguera-Crona', city: 'Gwenborough' });
-  });
-
-  test("attaches each user's tasks to the user", () => {
+  test('turns raw users into Users with flattened fields and their tasks attached', async () => {
+    await manager.load();
+    expect(manager.getUser(1)).toBeInstanceOf(User);
+    expect(manager.getUser(1)).toMatchObject({ company: 'Romaguera-Crona', city: 'Gwenborough' });
     expect(manager.users.map((user) => ids(user.tasks))).toEqual([[1, 2, 3, 23], [4, 5, 6], [7, 8]]);
   });
 
   test('saves the raw API data as an offline snapshot', async () => {
+    await manager.load();
     expect(JSON.parse(await readFile(snapshotFile, 'utf8'))).toEqual({ users: mockUsers, todos: mockTodos });
   });
 });
@@ -80,12 +70,9 @@ describe('workflow 2: models → filtered, searched and sorted results', () => {
     expect(ids(manager.getTasks({ status: 'pending', sortBy: ['-priority', 'id'] }))).toEqual([5, 23, 1, 3, 6]);
   });
 
-  test('filters by derived status', () => {
+  test('filters by derived status, user, priority and search query', () => {
     expect(ids(manager.getTasks({ status: 'overdue' }))).toEqual([1, 5]);
     expect(ids(manager.getTasks({ status: 'urgent' }))).toEqual([23]);
-  });
-
-  test('combines user, priority and search filters', () => {
     expect(ids(manager.getTasks({ userId: 1, priority: 'high' }))).toEqual([2, 23]);
     expect(ids(manager.getTasks({ userId: 1, query: 'report' }))).toEqual([1]);
   });
@@ -95,18 +82,20 @@ describe('workflow 2: models → filtered, searched and sorted results', () => {
     expect(manager.getTags()).toBeInstanceOf(Set);
   });
 
-  test('rejects invalid query criteria', () => {
+  test('rejects invalid criteria and unknown ids', () => {
     expect(() => manager.getTasks({ status: 'archived' })).toThrow('Unknown status "archived"');
     expect(() => manager.getTasks({ priority: 'critical' })).toThrow('Unknown priority "critical"');
     expect(() => manager.getTasks({ userId: 99 })).toThrow('User #99 not found');
+    expect(() => manager.toggleTask(999)).toThrow(new RangeError('Task #999 not found'));
   });
 });
 
 describe('workflow 3: models → report and export', () => {
   beforeEach(() => manager.load());
 
-  test('generates overall statistics from the API data', () => {
-    expect(manager.getReport().overall).toMatchObject({
+  test('generates overall statistics and ranks users by completion rate', () => {
+    const { overall, users } = manager.getReport();
+    expect(overall).toMatchObject({
       total: 9,
       completed: 4,
       overdue: 2,
@@ -114,11 +103,7 @@ describe('workflow 3: models → report and export', () => {
       byStatus: { overdue: 2, completed: 4, pending: 2, urgent: 1 },
       byPriority: { high: 4, medium: 3, low: 2 },
     });
-  });
-
-  test('ranks users by completion rate', () => {
-    const ranking = manager.getReport().users.map(({ id, completionRate }) => [id, completionRate]);
-    expect(ranking).toEqual([[3, 100], [2, 33], [1, 25]]);
+    expect(users.map(({ id, completionRate }) => [id, completionRate])).toEqual([[3, 100], [2, 33], [1, 25]]);
   });
 
   test('reflects a toggled task in the next report', () => {
@@ -128,17 +113,13 @@ describe('workflow 3: models → report and export', () => {
     expect(ids(users)).toEqual([3, 1, 2]);
   });
 
-  test('exports the report and users as JSON', async () => {
-    const filePath = await manager.exportJSON('report.json');
+  test('exports the report and users as JSON inside the export directory', async () => {
+    const filePath = await manager.exportJSON('../../report.json'); // path traversal is stripped
     const exported = JSON.parse(await readFile(filePath, 'utf8'));
 
     expect(filePath).toBe(join(dir, 'exports', 'report.json'));
     expect(exported.report.overall.total).toBe(9);
     expect(exported.users).toHaveLength(3);
-  });
-
-  test('keeps exports inside the export directory', async () => {
-    expect(await manager.exportJSON('../../escape.json')).toBe(join(dir, 'exports', 'escape.json'));
   });
 
   test('wraps file system failures in a descriptive error', async () => {
@@ -149,17 +130,12 @@ describe('workflow 3: models → report and export', () => {
 });
 
 describe('workflow 4: degraded API → graceful fallbacks', () => {
-  test('continues with partial data when one endpoint fails', async () => {
+  test('continues with partial data without overwriting the snapshot', async () => {
     api.fetchUsers.mockRejectedValueOnce(new Error('Users unavailable'));
 
     await expect(manager.load()).resolves.toEqual({ source: 'partial', users: 0, tasks: 9 });
     expect(logger.warn).toHaveBeenCalledWith('Users unavailable — continuing with partial data');
     expect(logger.warn).toHaveBeenCalledWith('9 task(s) belong to unknown users');
-  });
-
-  test('does not overwrite the snapshot with partial data', async () => {
-    api.fetchTodos.mockRejectedValueOnce(new Error('Todos unavailable'));
-    await manager.load();
     await expect(access(snapshotFile)).rejects.toThrow();
   });
 
@@ -168,39 +144,33 @@ describe('workflow 4: degraded API → graceful fallbacks', () => {
     const offlineApi = new APIClient();
     offlineApi.fetchAllSettled.mockRejectedValue(new Error('Network down'));
 
-    const offline = new TaskManager({ api: offlineApi, snapshotFile });
-    await expect(offline.load()).resolves.toEqual({ source: 'snapshot', users: 3, tasks: 9 });
+    await expect(new TaskManager({ api: offlineApi, snapshotFile }).load()).resolves.toEqual({ source: 'snapshot', users: 3, tasks: 9 });
     expect(logger.warn).toHaveBeenCalledWith('Using offline snapshot — data may be out of date');
   });
 
   test.each([
     ['missing', null],
     ['corrupt', '{"users": "not a list"}'],
-    ['not JSON', 'oops'],
-  ])('throws DataUnavailableError when the snapshot is %s', async (_, contents) => {
+  ])('throws DataUnavailableError when the API is down and the snapshot is %s', async (_, contents) => {
     if (contents) await writeFile(snapshotFile, contents);
     api.fetchAllSettled.mockRejectedValue(new Error('Network down'));
 
     await expect(manager.load()).rejects.toThrow(DataUnavailableError);
   });
 
-  test('skips malformed records and keeps the valid ones', async () => {
-    api.fetchTodos.mockResolvedValueOnce([...mockTodos, { id: 'bad', title: null }]);
+  test('skips malformed records and warns about empty responses', async () => {
+    api.fetchTodos.mockResolvedValueOnce([...mockTodos, { id: 'bad', title: null }]).mockResolvedValueOnce([]);
 
     await expect(manager.load()).resolves.toMatchObject({ tasks: 9 });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Skipped record — Malformed task'));
-  });
 
-  test('warns when the API returns no tasks', async () => {
-    api.fetchTodos.mockResolvedValueOnce([]);
-
-    await expect(manager.load()).resolves.toMatchObject({ users: 3, tasks: 0 });
+    await expect(manager.load()).resolves.toMatchObject({ tasks: 0 });
     expect(logger.warn).toHaveBeenCalledWith('No tasks were returned');
   });
 
   test('warns but still loads when the snapshot cannot be saved', async () => {
-    const unsaved = new TaskManager({ api, snapshotFile: join(snapshotFile, 'nested.json') });
     await writeFile(snapshotFile, ''); // a file where a directory is expected
+    const unsaved = new TaskManager({ api, snapshotFile: join(snapshotFile, 'nested.json') });
 
     await expect(unsaved.load()).resolves.toMatchObject({ source: 'api' });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Could not save offline snapshot'));

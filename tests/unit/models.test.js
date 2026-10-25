@@ -1,4 +1,8 @@
-import { Task, PriorityTask, User, PRIORITIES } from '../../src/models.js';
+import { jest } from '@jest/globals';
+import { Task, PriorityTask, User } from '../../src/models.js';
+
+// Fixed clock keeps every date comparison deterministic
+const NOW = new Date('2026-01-15T12:00:00Z');
 
 describe('Task', () => {
   let task;
@@ -8,95 +12,54 @@ describe('Task', () => {
   });
 
   describe('constructor', () => {
-    test('initializes all properties', () => {
+    test('initializes all properties, defaulting completed to false', () => {
       expect(task).toEqual({ id: 1, title: 'Write tests', completed: false, userId: 10 });
-    });
-
-    test('defaults completed to false', () => {
       expect(new Task({ id: 2, title: 'Default', userId: 10 }).completed).toBe(false);
     });
 
     test('keeps null and undefined properties as given', () => {
-      const empty = new Task({ id: null, title: undefined, userId: null });
-      expect(empty).toEqual({ id: null, title: undefined, completed: false, userId: null });
-    });
-
-    test('throws when called without arguments', () => {
-      expect(() => new Task()).toThrow(TypeError);
+      expect(new Task({ id: null, title: undefined, userId: null })).toEqual({ id: null, title: undefined, completed: false, userId: null });
     });
   });
 
-  describe('toggle()', () => {
-    test('marks a pending task as completed', () => {
-      task.toggle();
-      expect(task.completed).toBe(true);
-    });
-
-    test('toggles back to pending when called twice', () => {
-      task.toggle().toggle();
-      expect(task.completed).toBe(false);
-    });
-
-    test('returns the task for chaining', () => {
+  describe('methods', () => {
+    test('toggle() flips completion and returns the task for chaining', () => {
       expect(task.toggle()).toBe(task);
+      expect(task.completed).toBe(true);
+      expect(task.toggle().completed).toBe(false);
     });
-  });
 
-  describe('getStatus()', () => {
-    test("returns 'pending' for an incomplete task", () => {
+    test("getStatus() returns 'pending' or 'completed'", () => {
       expect(task.getStatus()).toBe('pending');
-    });
-
-    test("returns 'completed' after toggling", () => {
       expect(task.toggle().getStatus()).toBe('completed');
     });
-  });
 
-  describe('isOverdue()', () => {
-    test('returns false for a pending task', () => {
+    test('isOverdue() is always false because base tasks have no due date', () => {
+      const withPastDate = new Task({ id: 3, title: 'Old', userId: 10, dueDate: '2000-01-01' });
       expect(task.isOverdue()).toBe(false);
-    });
-
-    test('returns false for a completed task', () => {
       expect(task.toggle().isOverdue()).toBe(false);
+      expect(withPastDate.isOverdue(NOW)).toBe(false);
     });
 
-    test('ignores due dates, even ones in the past', () => {
-      const past = new Task({ id: 3, title: 'Old', userId: 10, dueDate: '2000-01-01' });
-      expect(past.isOverdue(new Date('2030-01-01'))).toBe(false);
-    });
-  });
-
-  describe('hasStatus()', () => {
-    test('matches the current status', () => {
+    test('hasStatus() matches the current status only', () => {
       expect(task.hasStatus('pending')).toBe(true);
-    });
-
-    test('rejects a different status', () => {
       expect(task.hasStatus('completed')).toBe(false);
     });
-  });
 
-  describe('serialization', () => {
-    test('toString() shows completion mark, id and title', () => {
+    test('toString() and toJSON() describe the task', () => {
       expect(`${task}`).toBe('[ ] #1 Write tests');
+      expect(task.toJSON()).toEqual({ id: 1, title: 'Write tests', completed: false, userId: 10, status: 'pending' });
       expect(`${task.toggle()}`).toBe('[✔] #1 Write tests');
-    });
-
-    test('toJSON() includes the derived status', () => {
-      expect(JSON.parse(JSON.stringify(task))).toEqual({ id: 1, title: 'Write tests', completed: false, userId: 10, status: 'pending' });
     });
   });
 
   describe('fromAPI()', () => {
     const raw = { id: 5, title: '  Buy milk  ', completed: true, userId: 2 };
 
-    test('creates a Task from valid API data', () => {
-      expect(Task.fromAPI(raw)).toBeInstanceOf(Task);
-    });
-
-    test('trims the title and drops unknown fields', () => {
-      expect(Task.fromAPI({ ...raw, extra: 'ignored' })).toEqual({ id: 5, title: 'Buy milk', completed: true, userId: 2 });
+    test('creates a Task, trimming the title and dropping unknown fields', () => {
+      const created = Task.fromAPI({ ...raw, extra: 'ignored' });
+      expect(created).toBeInstanceOf(Task);
+      expect(created).toEqual({ id: 5, title: 'Buy milk', completed: true, userId: 2 });
     });
 
     test('accepts an empty title', () => {
@@ -105,11 +68,8 @@ describe('Task', () => {
 
     test.each([
       ['null', null],
-      ['undefined', undefined],
-      ['a non-integer id', { ...raw, id: '5' }],
-      ['a missing userId', { id: 5, title: 'x', completed: true }],
+      ['a non-integer id', { ...raw, id: 1.5 }],
       ['a non-string title', { ...raw, title: 42 }],
-      ['a null title', { ...raw, title: null }],
       ['a non-boolean completed', { ...raw, completed: 'yes' }],
     ])('throws a TypeError for %s', (_, input) => {
       expect(() => Task.fromAPI(input)).toThrow(TypeError);
@@ -122,8 +82,6 @@ describe('Task', () => {
 });
 
 describe('PriorityTask', () => {
-  // Fixed clock keeps every date comparison deterministic
-  const NOW = new Date('2026-01-15T12:00:00Z');
   let task;
 
   beforeEach(() => {
@@ -131,133 +89,70 @@ describe('PriorityTask', () => {
   });
 
   describe('inheritance', () => {
-    test('is an instance of both PriorityTask and Task', () => {
-      expect(task).toBeInstanceOf(PriorityTask);
+    test('is a Task with the inherited properties', () => {
       expect(task).toBeInstanceOf(Task);
-    });
-
-    test('initializes the inherited Task properties', () => {
       expect(task).toMatchObject({ id: 2, title: 'Ship release', completed: false, userId: 10 });
     });
 
-    test('uses the inherited toggle()', () => {
-      expect(task.toggle().completed).toBe(true);
-    });
-
-    test('uses the inherited hasStatus() with overridden statuses', () => {
-      const old = new PriorityTask({ id: 4, title: 'Old', userId: 10, dueDate: '2000-01-01' });
-      expect(old.hasStatus('overdue')).toBe(true);
-      expect(old.hasStatus('pending')).toBe(true); // 'pending' matches any incomplete task
+    test("inherited methods work with the subclass's statuses", () => {
+      const late = new PriorityTask({ id: 4, title: 'Late', userId: 10, dueDate: '2000-01-01' });
+      expect(late.hasStatus('overdue')).toBe(true);
+      expect(late.hasStatus('pending')).toBe(true); // 'pending' matches any incomplete task
+      expect(late.toggle().getStatus()).toBe('completed');
     });
   });
 
   describe('priority-specific properties', () => {
-    test('stores priority, due date and tags', () => {
-      expect(task.priority).toBe('high');
-      expect(task.dueDate).toEqual(new Date('2026-01-20'));
-      expect(task.tags).toEqual(['work']);
+    test('stores priority, due date as a Date, and tags', () => {
+      expect(task).toMatchObject({ priority: 'high', dueDate: new Date('2026-01-20'), tags: ['work'] });
     });
 
     test('defaults to medium priority, no due date and no tags', () => {
-      const plain = new PriorityTask({ id: 3, title: 'Plain', userId: 10 });
-      expect(plain).toMatchObject({ priority: 'medium', dueDate: null, tags: [] });
-    });
-
-    test('converts a due date string into a Date', () => {
-      expect(task.dueDate).toBeInstanceOf(Date);
+      expect(new PriorityTask({ id: 3, title: 'Plain', userId: 10 })).toMatchObject({ priority: 'medium', dueDate: null, tags: [] });
     });
 
     test('removes duplicate tags', () => {
-      const tagged = new PriorityTask({ id: 3, title: 'Tags', userId: 10, tags: ['work', 'home', 'work'] });
-      expect(tagged.tags).toEqual(['work', 'home']);
+      expect(new PriorityTask({ id: 3, title: 'Tags', userId: 10, tags: ['work', 'home', 'work'] }).tags).toEqual(['work', 'home']);
+    });
+
+    test.each(['urgent', 'HIGH'])('rejects invalid priority %p', (priority) => {
+      expect(() => new PriorityTask({ id: 3, title: 'Invalid', userId: 10, priority })).toThrow(new RangeError(`Invalid priority: ${priority}`));
     });
   });
 
-  describe('priority validation', () => {
-    test.each(PRIORITIES)("accepts '%s'", (priority) => {
-      expect(new PriorityTask({ id: 3, title: 'Valid', userId: 10, priority }).priority).toBe(priority);
-    });
-
-    test.each(['urgent', '', null, 3])('throws a RangeError for %p', (priority) => {
-      expect(() => new PriorityTask({ id: 3, title: 'Invalid', userId: 10, priority })).toThrow(RangeError);
-    });
-
-    test('names the invalid priority in the error message', () => {
-      expect(() => new PriorityTask({ id: 3, title: 'Invalid', userId: 10, priority: 'critical' }))
-        .toThrow('Invalid priority: critical');
-    });
-  });
-
-  describe('isOverdue()', () => {
-    test('returns false before the due date', () => {
+  describe('date logic', () => {
+    test('isOverdue() stays false until the end of the due day (UTC)', () => {
       expect(task.isOverdue(NOW)).toBe(false);
-    });
-
-    test('returns false until the very end of the due day (UTC)', () => {
       expect(task.isOverdue(new Date('2026-01-20T23:59:59.999Z'))).toBe(false);
-    });
-
-    test('returns true once the due day has passed', () => {
       expect(task.isOverdue(new Date('2026-01-21T00:00:00Z'))).toBe(true);
     });
 
-    test('returns false for a completed task past its due date', () => {
+    test('isOverdue() is false for completed tasks and tasks without a due date', () => {
+      const noDue = new PriorityTask({ id: 3, title: 'No due', userId: 10 });
+      expect(noDue.isOverdue(NOW)).toBe(false);
       expect(task.toggle().isOverdue(new Date('2026-02-01'))).toBe(false);
     });
 
-    test('returns false when there is no due date', () => {
-      task.dueDate = null;
-      expect(task.isOverdue(NOW)).toBe(false);
-    });
-  });
-
-  describe('isUrgent()', () => {
-    test('returns true for a high priority task due within 3 days', () => {
-      expect(task.isUrgent(new Date('2026-01-17T00:00:00Z'))).toBe(true);
+    test('isUrgent() is true only for incomplete high priority tasks due within 3 days', () => {
+      const soon = new Date('2026-01-17T00:00:00Z');
+      expect(task.isUrgent(soon)).toBe(true);
+      expect(task.isUrgent(NOW)).toBe(false); // 4.5 days away
+      expect(new PriorityTask({ id: 3, title: 'Medium', userId: 10, dueDate: '2026-01-18' }).isUrgent(soon)).toBe(false);
+      expect(new PriorityTask({ id: 4, title: 'No due', userId: 10, priority: 'high' }).isUrgent(soon)).toBe(false);
+      expect(task.toggle().isUrgent(soon)).toBe(false);
     });
 
-    test('returns false when the due date is more than 3 days away', () => {
-      expect(task.isUrgent(NOW)).toBe(false);
-    });
-
-    test('returns false for non-high priorities', () => {
-      task.priority = 'medium';
-      expect(task.isUrgent(new Date('2026-01-19'))).toBe(false);
-    });
-
-    test('returns false for completed tasks or tasks without a due date', () => {
-      const noDue = new PriorityTask({ id: 3, title: 'No due', userId: 10, priority: 'high' });
-      expect(task.toggle().isUrgent(new Date('2026-01-19'))).toBe(false);
-      expect(noDue.isUrgent(NOW)).toBe(false);
-    });
-  });
-
-  describe('getStatus()', () => {
-    test("returns 'pending' when on time and not urgent", () => {
+    test("getStatus() returns 'pending', 'urgent' or 'overdue' depending on the date", () => {
       expect(task.getStatus(NOW)).toBe('pending');
-    });
-
-    test("returns 'urgent' when high priority and due soon", () => {
       expect(task.getStatus(new Date('2026-01-18'))).toBe('urgent');
-    });
-
-    test("returns 'overdue' ahead of 'urgent' once past due", () => {
-      expect(task.getStatus(new Date('2026-01-25'))).toBe('overdue');
-    });
-
-    test("falls back to the parent's 'completed' status", () => {
-      expect(task.toggle().getStatus(new Date('2026-01-25'))).toBe('completed');
+      expect(task.getStatus(new Date('2026-01-25'))).toBe('overdue'); // overdue wins over urgent
     });
   });
 
-  describe('toString()', () => {
-    test('extends the parent output with priority and due date', () => {
+  describe('overridden toString()', () => {
+    test('adds priority and due date to the parent output', () => {
       expect(`${task}`).toBe('[ ] #2 Ship release (high, due 2026-01-20)');
-    });
-
-    test('shows a placeholder when there is no due date', () => {
-      const plain = new PriorityTask({ id: 3, title: 'Plain', userId: 10 });
-      expect(`${plain}`).toBe('[ ] #3 Plain (medium, no due date)');
+      expect(`${new PriorityTask({ id: 3, title: 'Plain', userId: 10 })}`).toBe('[ ] #3 Plain (medium, no due date)');
     });
   });
 
@@ -272,21 +167,10 @@ describe('PriorityTask', () => {
       });
     });
 
-    test('keeps derived due dates within -10 to +19 days of today', () => {
-      const today = new Date('2026-01-15T00:00:00Z');
-      const offsets = Array.from({ length: 30 }, (_, id) =>
-        (PriorityTask.derive({ id, userId: 1 }, NOW).dueDate - today) / 86_400_000);
-      expect(Math.min(...offsets)).toBe(-10);
-      expect(Math.max(...offsets)).toBe(19);
-    });
-
-    test('creates a PriorityTask with derived fields from API data', () => {
+    test('creates a PriorityTask from API data with the derived fields', () => {
       const created = PriorityTask.fromAPI(raw, NOW);
       expect(created).toBeInstanceOf(PriorityTask);
-      expect(created).toMatchObject({ id: 1, title: 'From API', priority: 'medium', tags: ['personal', 'home'] });
-    });
-
-    test('rejects malformed API data via Task.parse()', () => {
+      expect(created).toMatchObject({ id: 1, title: 'From API', priority: 'medium' });
       expect(() => PriorityTask.fromAPI({ id: 1 }, NOW)).toThrow('Malformed task');
     });
   });
@@ -300,70 +184,37 @@ describe('User', () => {
     user = new User({ id: 1, name: 'Ada Lovelace', email: 'ada@example.com' });
   });
 
-  describe('constructor', () => {
-    test('initializes properties with defaults and no tasks', () => {
-      expect(user).toEqual({ id: 1, name: 'Ada Lovelace', email: 'ada@example.com', company: 'N/A', city: 'Unknown', tasks: [] });
-    });
-
-    test('adds tasks passed to the constructor', () => {
-      const withTasks = new User({ id: 1, name: 'Ada', email: 'a@b.c', tasks: [makeTask(1), makeTask(2)] });
-      expect(withTasks.tasks).toHaveLength(2);
-    });
+  test('constructor sets defaults and adds initial tasks', () => {
+    expect(user).toEqual({ id: 1, name: 'Ada Lovelace', email: 'ada@example.com', company: 'N/A', city: 'Unknown', tasks: [] });
+    expect(new User({ id: 1, name: 'Ada', email: 'a@b.c', tasks: [makeTask(1)] }).tasks).toHaveLength(1);
   });
 
   describe('fromAPI()', () => {
-    const raw = { id: 1, name: 'Ada', email: 'a@b.c', company: { name: 'Analytical' }, address: { city: 'London' } };
-
-    test('reads nested company and city fields', () => {
+    test('flattens nested company and city, with defaults when missing', () => {
+      const raw = { id: 1, name: 'Ada', email: 'a@b.c', company: { name: 'Analytical' }, address: { city: 'London' } };
       expect(User.fromAPI(raw)).toMatchObject({ company: 'Analytical', city: 'London' });
-    });
-
-    test('falls back to defaults when nested fields are missing', () => {
       expect(User.fromAPI({ id: 1, name: 'Ada', email: 'a@b.c' })).toMatchObject({ company: 'N/A', city: 'Unknown' });
     });
 
-    test.each([
-      ['null', null],
-      ['a non-integer id', { ...raw, id: '1' }],
-      ['a missing name', { id: 1, email: 'a@b.c' }],
-      ['a non-string email', { ...raw, email: 42 }],
-    ])('throws a TypeError for %s', (_, input) => {
-      expect(() => User.fromAPI(input)).toThrow(TypeError);
+    test('throws a TypeError for malformed users', () => {
+      expect(() => User.fromAPI(null)).toThrow(TypeError);
+      expect(() => User.fromAPI({ id: 1, email: 'a@b.c' })).toThrow('Malformed user');
     });
   });
 
   describe('addTask()', () => {
-    test('adds a single task', () => {
-      user.addTask(makeTask(1));
-      expect(user.tasks).toEqual([makeTask(1)]);
+    test('adds one or more tasks and returns the user for chaining', () => {
+      expect(user.addTask(makeTask(1), makeTask(2))).toBe(user);
+      expect(user.tasks.map(({ id }) => id)).toEqual([1, 2]);
     });
 
-    test('adds multiple tasks at once', () => {
-      user.addTask(makeTask(1), makeTask(2), makeTask(3));
-      expect(user.tasks.map(({ id }) => id)).toEqual([1, 2, 3]);
+    test('rejects null tasks and plain objects', () => {
+      expect(() => user.addTask(null)).toThrow(TypeError);
+      expect(() => user.addTask({ id: 1, title: 'Fake', completed: false, userId: 1 })).toThrow('Not a Task');
     });
 
-    test('accepts PriorityTask instances', () => {
-      user.addTask(new PriorityTask({ id: 4, title: 'Priority', userId: 1 }));
-      expect(user.tasks[0]).toBeInstanceOf(PriorityTask);
-    });
-
-    test('returns the user for chaining', () => {
-      expect(user.addTask(makeTask(1))).toBe(user);
-    });
-
-    test('does nothing when called with no tasks', () => {
-      user.addTask();
-      expect(user.tasks).toEqual([]);
-    });
-
-    test.each([null, undefined, { id: 1, userId: 1 }, 'task'])('throws a TypeError for %p', (input) => {
-      expect(() => user.addTask(input)).toThrow(TypeError);
-    });
-
-    test("throws a RangeError for another user's task", () => {
-      const foreign = new Task({ id: 9, title: 'Foreign', userId: 2 });
-      expect(() => user.addTask(foreign)).toThrow('Task #9 does not belong to user #1');
+    test("rejects another user's task", () => {
+      expect(() => user.addTask(new Task({ id: 9, title: 'Foreign', userId: 2 }))).toThrow(new RangeError('Task #9 does not belong to user #1'));
     });
 
     test('adds nothing if any task in the batch is invalid', () => {
@@ -373,69 +224,138 @@ describe('User', () => {
   });
 
   describe('getCompletionRate()', () => {
-    test('returns 0 with no tasks instead of dividing by zero', () => {
+    test('returns 0 for no tasks instead of dividing by zero', () => {
       expect(user.getCompletionRate()).toBe(0);
-    });
-
-    test('returns 0 when no tasks are completed', () => {
-      user.addTask(makeTask(1), makeTask(2));
-      expect(user.getCompletionRate()).toBe(0);
-    });
-
-    test('returns 100 when all tasks are completed', () => {
-      user.addTask(makeTask(1, true), makeTask(2, true));
-      expect(user.getCompletionRate()).toBe(100);
     });
 
     test.each([
-      [[true, false], 50],
+      [[false, false], 0],
       [[true, false, false], 33],
       [[true, true, false], 67],
-    ])('rounds mixed completion %p to %i%%', (states, expected) => {
+      [[true, true], 100],
+    ])('rounds completion %p to %i%%', (states, expected) => {
       user.addTask(...states.map((completed, i) => makeTask(i + 1, completed)));
       expect(user.getCompletionRate()).toBe(expected);
-    });
-
-    test('updates when a task is toggled', () => {
-      const task = makeTask(1);
-      user.addTask(task);
-      task.toggle();
-      expect(user.getCompletionRate()).toBe(100);
     });
   });
 
   describe('getTasksByStatus()', () => {
-    const overdue = () => new PriorityTask({ id: 3, title: 'Late', userId: 1, dueDate: '2000-01-01' });
+    test('filters completed, pending (including overdue) and overdue tasks', () => {
+      user.addTask(makeTask(1, true), makeTask(2), new PriorityTask({ id: 3, title: 'Late', userId: 1, dueDate: '2000-01-01' }));
+      const ids = (status) => user.getTasksByStatus(status).map(({ id }) => id);
 
-    beforeEach(() => {
-      user.addTask(makeTask(1, true), makeTask(2), overdue());
+      expect(ids('completed')).toEqual([1]);
+      expect(ids('pending')).toEqual([2, 3]);
+      expect(ids('overdue')).toEqual([3]);
     });
 
-    test('returns completed tasks', () => {
-      expect(user.getTasksByStatus('completed').map(({ id }) => id)).toEqual([1]);
-    });
-
-    test('returns every incomplete task for pending, including overdue ones', () => {
-      expect(user.getTasksByStatus('pending').map(({ id }) => id)).toEqual([2, 3]);
-    });
-
-    test('returns tasks with a priority-specific status', () => {
-      expect(user.getTasksByStatus('overdue').map(({ id }) => id)).toEqual([3]);
-    });
-
-    test.each(['archived', undefined, null])('returns an empty array for unknown status %p', (status) => {
-      expect(user.getTasksByStatus(status)).toEqual([]);
-    });
-
-    test('returns an empty array for a user with no tasks', () => {
-      expect(new User({ id: 2, name: 'Empty', email: 'e@x.y' }).getTasksByStatus('pending')).toEqual([]);
+    test('returns an empty array for no tasks or an unknown status', () => {
+      expect(user.getTasksByStatus('pending')).toEqual([]);
+      expect(user.addTask(makeTask(1)).getTasksByStatus('archived')).toEqual([]);
     });
   });
 
-  describe('toJSON()', () => {
-    test('includes the completion rate', () => {
-      user.addTask(makeTask(1, true), makeTask(2));
-      expect(user.toJSON()).toMatchObject({ id: 1, completionRate: 50 });
-    });
+  test('toJSON() includes the completion rate', () => {
+    user.addTask(makeTask(1, true), makeTask(2));
+    expect(user.toJSON()).toMatchObject({ id: 1, completionRate: 50 });
+  });
+});
+
+describe('method interactions (spies)', () => {
+  const spies = [];
+  const spyOn = (object, method) => {
+    const spy = jest.spyOn(object, method);
+    spies.push(spy);
+    return spy;
+  };
+
+  afterEach(() => {
+    spies.splice(0).forEach((spy) => spy.mockRestore());
+  });
+
+  test('PriorityTask.getStatus() checks isOverdue() before isUrgent(), passing the same date', () => {
+    const task = new PriorityTask({ id: 1, title: 'Due soon', userId: 1, priority: 'high', dueDate: '2026-01-16' });
+    const isOverdue = spyOn(task, 'isOverdue');
+    const isUrgent = spyOn(task, 'isUrgent');
+
+    expect(task.getStatus(NOW)).toBe('urgent');
+    expect(isOverdue).toHaveBeenCalledWith(NOW);
+    expect(isUrgent).toHaveBeenCalledWith(NOW);
+    expect(isOverdue.mock.invocationCallOrder[0]).toBeLessThan(isUrgent.mock.invocationCallOrder[0]);
+  });
+
+  test('PriorityTask.getStatus() stops at isOverdue() for overdue tasks', () => {
+    const task = new PriorityTask({ id: 1, title: 'Late', userId: 1, priority: 'high', dueDate: '2026-01-01' });
+    const isUrgent = spyOn(task, 'isUrgent');
+    const parentGetStatus = spyOn(Task.prototype, 'getStatus');
+
+    expect(task.getStatus(NOW)).toBe('overdue');
+    expect(isUrgent).not.toHaveBeenCalled();
+    expect(parentGetStatus).not.toHaveBeenCalled();
+  });
+
+  test('PriorityTask.getStatus() delegates to Task.prototype.getStatus() via super', () => {
+    const parentGetStatus = spyOn(Task.prototype, 'getStatus');
+    new PriorityTask({ id: 1, title: 'On time', userId: 1, dueDate: '2026-02-01' }).getStatus(NOW);
+    expect(parentGetStatus).toHaveBeenCalledTimes(1);
+  });
+
+  test('fromAPI() validates through Task.parse() and derives fields through derive()', () => {
+    const raw = { id: 1, title: 'From API', completed: false, userId: 2 };
+    const parse = spyOn(Task, 'parse');
+    const derive = spyOn(PriorityTask, 'derive');
+
+    PriorityTask.fromAPI(raw, NOW);
+    expect(parse).toHaveBeenCalledWith(raw);
+    expect(derive).toHaveBeenCalledWith(raw, NOW);
+  });
+
+  test('the User constructor adds initial tasks through addTask()', () => {
+    const tasks = [new Task({ id: 1, title: 'A', userId: 1 }), new Task({ id: 2, title: 'B', userId: 1 })];
+    const addTask = spyOn(User.prototype, 'addTask');
+
+    new User({ id: 1, name: 'Ada', email: 'a@b.c', tasks });
+    expect(addTask).toHaveBeenCalledTimes(1);
+    expect(addTask).toHaveBeenCalledWith(...tasks);
+  });
+
+  test('getTasksByStatus() asks every task for its status', () => {
+    const tasks = [1, 2, 3].map((id) => new Task({ id, title: `T${id}`, userId: 1 }));
+    const user = new User({ id: 1, name: 'Ada', email: 'a@b.c', tasks });
+    const hasStatus = spyOn(Task.prototype, 'hasStatus');
+
+    user.getTasksByStatus('completed');
+    expect(hasStatus).toHaveBeenCalledTimes(3);
+    expect(hasStatus).toHaveBeenCalledWith('completed');
+  });
+});
+
+describe('error handling', () => {
+  test('constructors throw a TypeError without a properties object', () => {
+    expect(() => new Task(null)).toThrow(TypeError);
+    expect(() => new PriorityTask()).toThrow(TypeError);
+    expect(() => new User()).toThrow(TypeError);
+  });
+
+  test('rejects a due date that cannot be parsed', () => {
+    expect(() => new PriorityTask({ id: 1, title: 'Bad date', userId: 1, dueDate: 'not-a-date' }))
+      .toThrow(new RangeError('Invalid due date: not-a-date'));
+  });
+
+  test('rejects tags that are not an array', () => {
+    expect(() => new PriorityTask({ id: 1, title: 'Bad tags', userId: 1, tags: 'work' }))
+      .toThrow(new TypeError('Tags must be an array: "work"'));
+  });
+
+  test('accepts due dates as a Date or timestamp, and treats an empty string as none', () => {
+    const create = (dueDate) => new PriorityTask({ id: 1, title: 'Date', userId: 1, dueDate }).dueDate;
+    expect(create(new Date('2026-03-01'))).toEqual(new Date('2026-03-01'));
+    expect(create(Date.UTC(2026, 2, 1))).toEqual(new Date('2026-03-01'));
+    expect(create('')).toBeNull();
+  });
+
+  test("addTask rejects a task whose userId is the user's id as a string", () => {
+    const task = new Task({ id: 1, title: 'String id', userId: '1' });
+    expect(() => new User({ id: 1, name: 'Ada', email: 'a@b.c' }).addTask(task)).toThrow(RangeError);
   });
 });

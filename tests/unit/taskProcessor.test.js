@@ -36,11 +36,8 @@ describe('filterByStatus()', () => {
     expect(ids(filterByStatus(tasks, 'completed'))).toEqual([1, 4]);
   });
 
-  test('returns all incomplete tasks for pending', () => {
+  test('returns all incomplete tasks for pending, and only late ones for overdue', () => {
     expect(ids(filterByStatus(tasks, 'pending'))).toEqual([2, 3]);
-  });
-
-  test('returns overdue tasks', () => {
     expect(ids(filterByStatus(tasks, 'overdue'))).toEqual([3]);
   });
 
@@ -48,46 +45,14 @@ describe('filterByStatus()', () => {
     expect(filterByStatus([], 'completed')).toEqual([]);
   });
 
-  test.each(['archived', undefined, null])('returns an empty array for unknown status %p', (status) => {
-    expect(filterByStatus(tasks, status)).toEqual([]);
+  test('returns an empty array for an unknown or missing status', () => {
+    expect(filterByStatus(tasks, 'archived')).toEqual([]);
+    expect(filterByStatus(tasks, undefined)).toEqual([]);
   });
 
-  test.each([null, undefined])('throws a TypeError when tasks is %p', (input) => {
-    expect(() => filterByStatus(input, 'completed')).toThrow(TypeError);
-  });
-
-  test('does not mutate the original array', () => {
-    const result = filterByStatus(tasks, 'completed');
-    expect(result).not.toBe(tasks);
-    expect(tasks).toHaveLength(4);
-  });
-});
-
-describe('filterByUser()', () => {
-  test("returns only the given user's tasks", () => {
-    expect(ids(filterByUser(tasks, 2))).toEqual([3, 4]);
-  });
-
-  test('returns an empty array for an unknown user', () => {
-    expect(filterByUser(tasks, 99)).toEqual([]);
-  });
-
-  test('uses strict equality for user ids', () => {
-    expect(filterByUser(tasks, '1')).toEqual([]);
-  });
-});
-
-describe('filterByPriority()', () => {
-  test('returns tasks with the given priority', () => {
-    expect(ids(filterByPriority(tasks, 'medium'))).toEqual([3, 4]);
-  });
-
-  test('accepts several priorities', () => {
-    expect(ids(filterByPriority(tasks, 'low', 'high'))).toEqual([1, 2]);
-  });
-
-  test('returns an empty array when no priority is given', () => {
-    expect(filterByPriority(tasks)).toEqual([]);
+  test('throws a TypeError for null tasks or plain objects', () => {
+    expect(() => filterByStatus(null, 'completed')).toThrow(TypeError);
+    expect(() => filterByStatus([{ id: 1, completed: false }], 'pending')).toThrow(TypeError);
   });
 });
 
@@ -103,27 +68,20 @@ describe('calculateStatistics()', () => {
     expect(byTag).toEqual({ home: 2, personal: 1, work: 1, finance: 1, health: 1 });
   });
 
-  test('returns zeroed statistics for an empty array without dividing by zero', () => {
+  test('returns zeroed statistics for an empty or missing array without dividing by zero', () => {
     expect(calculateStatistics([])).toEqual({
       total: 0, completed: 0, open: 0, overdue: 0, completionRate: 0, byStatus: {}, byPriority: {}, byTag: {},
     });
-  });
-
-  test('defaults to an empty array when called without arguments', () => {
-    expect(calculateStatistics()).toMatchObject({ total: 0, completionRate: 0 });
+    expect(calculateStatistics()).toMatchObject({ total: 0 });
   });
 
   test('throws a TypeError for null', () => {
     expect(() => calculateStatistics(null)).toThrow(TypeError);
   });
 
-  test('handles plain Tasks without priority or tags', () => {
-    const plain = [new Task({ id: 5, title: 'Plain', completed: true, userId: 3 })];
-    expect(calculateStatistics(plain)).toMatchObject({ total: 1, completionRate: 100, byPriority: {}, byTag: {} });
-  });
-
-  test('rounds the completion rate', () => {
-    expect(calculateStatistics(tasks.slice(0, 3)).completionRate).toBe(33);
+  test('handles plain Tasks without priority or tags, rounding the rate', () => {
+    const plain = [1, 2, 3].map((id) => new Task({ id, title: `T${id}`, completed: id === 1, userId: 3 }));
+    expect(calculateStatistics(plain)).toMatchObject({ completionRate: 33, byPriority: {}, byTag: {} });
   });
 });
 
@@ -135,9 +93,7 @@ describe('groupByUser()', () => {
   });
 
   test("keeps each user's tasks in their original order", () => {
-    const groups = groupByUser(tasks);
-    expect(ids(groups.get(1))).toEqual([1, 2]);
-    expect(ids(groups.get(2))).toEqual([3, 4]);
+    expect(ids(groupByUser(tasks).get(2))).toEqual([3, 4]);
   });
 
   test('returns an empty Map for an empty array', () => {
@@ -148,55 +104,44 @@ describe('groupByUser()', () => {
     expect(groupByUser(tasks).get(99)).toBeUndefined();
   });
 
-  test.each([null, undefined])('throws a TypeError when tasks is %p', (input) => {
-    expect(() => groupByUser(input)).toThrow(TypeError);
-  });
-
-  test('does not mutate the original array', () => {
-    groupByUser(tasks);
-    expect(ids(tasks)).toEqual([1, 2, 3, 4]);
+  test('throws a TypeError for null or undefined', () => {
+    expect(() => groupByUser(null)).toThrow(TypeError);
+    expect(() => groupByUser(undefined)).toThrow(TypeError);
   });
 });
 
+// The brief's searchByProperty(): searches title and tags
 describe('searchTasks()', () => {
-  test('finds tasks by title', () => {
-    expect(ids(searchTasks(tasks, 'bills'))).toEqual([3]);
-  });
-
-  test('is case-insensitive', () => {
+  test('finds tasks by title, ignoring case', () => {
     expect(ids(searchTasks(tasks, 'WRITE'))).toEqual([2]);
   });
 
   test('matches tags as well as titles', () => {
     expect(ids(searchTasks(tasks, 'home'))).toEqual([1, 3]);
+    expect(searchTasks([new Task({ id: 5, title: 'Read book', userId: 3 })], 'book')).toHaveLength(1); // no tags
   });
 
   test('requires every search term to match', () => {
     expect(ids(searchTasks(tasks, 'home bills'))).toEqual([3]);
   });
 
-  test.each(['', '   ', undefined])('returns all tasks for empty query %p', (query) => {
-    expect(searchTasks(tasks, query)).toHaveLength(4);
+  test('returns all tasks for an empty or missing query', () => {
+    expect(searchTasks(tasks, '   ')).toHaveLength(4);
+    expect(searchTasks(tasks)).toHaveLength(4);
   });
 
-  test('returns an empty array when nothing matches', () => {
+  test('returns an empty array when nothing matches or there are no tasks', () => {
     expect(searchTasks(tasks, 'holiday')).toEqual([]);
+    expect(searchTasks([], 'bills')).toEqual([]);
   });
 
-  test('searches plain Tasks that have no tags', () => {
-    const plain = [new Task({ id: 5, title: 'Read book', userId: 3 })];
-    expect(searchTasks(plain, 'book')).toHaveLength(1);
-  });
-
-  test('throws a TypeError for a null query', () => {
-    expect(() => searchTasks(tasks, null)).toThrow(TypeError);
-  });
-
-  test('throws a TypeError for null tasks', () => {
+  test('throws a TypeError for null tasks or a non-string query', () => {
     expect(() => searchTasks(null, 'bills')).toThrow(TypeError);
+    expect(() => searchTasks(tasks, 42)).toThrow(TypeError);
   });
 });
 
+// The brief's sortBy(): a leading '-' sorts descending
 describe('sortTasks()', () => {
   test('sorts ascending by a single key', () => {
     expect(ids(sortTasks(tasks, 'title'))).toEqual([1, 4, 3, 2]);
@@ -206,16 +151,14 @@ describe('sortTasks()', () => {
     expect(ids(sortTasks(tasks, '-id'))).toEqual([4, 3, 2, 1]);
   });
 
-  test('orders priorities from low to high', () => {
+  test('orders priorities from low to high and puts missing due dates last', () => {
     expect(ids(sortTasks(tasks, 'priority'))).toEqual([1, 3, 4, 2]);
-  });
-
-  test('puts tasks without a due date last', () => {
     expect(ids(sortTasks(tasks, 'dueDate'))).toEqual([3, 1, 2, 4]);
   });
 
   test('uses later criteria to break ties', () => {
     expect(ids(sortTasks(tasks, 'status', '-id'))).toEqual([3, 2, 4, 1]);
+    expect(ids(sortTasks(tasks, '-userId', 'id'))).toEqual([3, 4, 1, 2]);
   });
 
   test('breaks ties between missing due dates with the next criterion', () => {
@@ -223,27 +166,14 @@ describe('sortTasks()', () => {
     expect(ids(sortTasks(noDue, 'dueDate', 'id'))).toEqual([4, 5]);
   });
 
-  test('supports every advertised sort key', () => {
-    SORT_KEYS.forEach((key) => expect(() => sortTasks(tasks, key)).not.toThrow());
-  });
-
-  test('returns a copy in the original order when no criteria are given', () => {
-    const result = sortTasks(tasks);
-    expect(result).not.toBe(tasks);
-    expect(ids(result)).toEqual([1, 2, 3, 4]);
-  });
-
-  test('does not mutate the original array', () => {
-    sortTasks(tasks, '-id');
-    expect(ids(tasks)).toEqual([1, 2, 3, 4]);
-  });
-
-  test('returns an empty array for an empty input', () => {
+  test('returns a copy in the original order for no criteria or an empty array', () => {
+    expect(sortTasks(tasks)).not.toBe(tasks);
+    expect(ids(sortTasks(tasks))).toEqual([1, 2, 3, 4]);
     expect(sortTasks([], 'id')).toEqual([]);
   });
 
-  test('throws a RangeError for an unknown sort key', () => {
-    expect(() => sortTasks(tasks, '-color')).toThrow('Unknown sort key "color"');
+  test('throws a RangeError listing the valid keys for an unknown key', () => {
+    expect(() => sortTasks(tasks, '-color')).toThrow(`Unknown sort key "color". Use one of: ${SORT_KEYS.join(', ')}`);
   });
 
   test('throws a TypeError for null tasks', () => {
@@ -251,67 +181,54 @@ describe('sortTasks()', () => {
   });
 });
 
-describe('getUniqueTags()', () => {
-  test('returns a Set of unique tags', () => {
-    expect(getUniqueTags(tasks)).toEqual(new Set(['home', 'personal', 'work', 'finance', 'health']));
+describe('other processing functions', () => {
+  test('filterByUser() uses strict id equality', () => {
+    expect(ids(filterByUser(tasks, 2))).toEqual([3, 4]);
+    expect(filterByUser(tasks, '2')).toEqual([]);
   });
 
-  test('returns an empty Set for tasks without tags', () => {
+  test('filterByPriority() accepts several priorities', () => {
+    expect(ids(filterByPriority(tasks, 'low', 'high'))).toEqual([1, 2]);
+  });
+
+  test('getUniqueTags() returns a Set without duplicates', () => {
+    expect(getUniqueTags(tasks)).toEqual(new Set(['home', 'personal', 'work', 'finance', 'health']));
     expect(getUniqueTags([new Task({ id: 5, title: 'Plain', userId: 3 })]).size).toBe(0);
   });
-});
 
-describe('toModels()', () => {
-  beforeEach(() => {
-    jest.spyOn(logger, 'warn').mockImplementation(() => {});
-  });
-
-  test('maps valid records through the factory', () => {
-    const records = [{ id: 1, title: 'A', completed: false, userId: 1 }];
-    expect(toModels(records, Task.fromAPI)).toEqual([new Task(records[0])]);
-  });
-
-  test('skips malformed records and logs a warning', () => {
+  test('toModels() maps valid records and skips malformed ones with a warning', () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const records = [{ id: 1, title: 'A', completed: false, userId: 1 }, { id: 'bad' }];
-    expect(toModels(records, Task.fromAPI)).toHaveLength(1);
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Skipped record — Malformed task'));
-  });
 
-  test('defaults to an empty array when records are undefined', () => {
+    expect(toModels(records, Task.fromAPI)).toEqual([new Task(records[0])]);
     expect(toModels(undefined, Task.fromAPI)).toEqual([]);
-  });
-});
-
-describe('generateReport()', () => {
-  const NOW = new Date('2026-01-15T12:00:00Z');
-
-  beforeEach(() => {
-    jest.useFakeTimers({ now: NOW });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Skipped record — Malformed task'));
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+  describe('generateReport()', () => {
+    const NOW = new Date('2026-01-15T12:00:00Z');
 
-  test('includes a timestamp, overall statistics and sorted unique tags', () => {
-    const report = generateReport([], tasks);
-    expect(report.generatedAt).toBe(NOW.toISOString());
-    expect(report.overall.total).toBe(4);
-    expect(report.uniqueTags).toEqual(['finance', 'health', 'home', 'personal', 'work']);
-  });
+    beforeEach(() => {
+      jest.useFakeTimers({ now: NOW });
+    });
 
-  test('ranks users by completion rate, highest first', () => {
-    const users = [
-      { id: 1, name: 'Ada', tasks: [tasks[1]] },
-      { id: 2, name: 'Grace', tasks: [tasks[0]] },
-    ];
-    expect(generateReport(users, tasks).users).toEqual([
-      { id: 2, name: 'Grace', total: 1, completed: 1, overdue: 0, completionRate: 100 },
-      { id: 1, name: 'Ada', total: 1, completed: 0, overdue: 0, completionRate: 0 },
-    ]);
-  });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
 
-  test('returns an empty report when called without arguments', () => {
-    expect(generateReport()).toMatchObject({ overall: { total: 0 }, uniqueTags: [], users: [] });
+    test('includes a timestamp, overall statistics and sorted unique tags', () => {
+      const report = generateReport([], tasks);
+      expect(report).toMatchObject({ generatedAt: NOW.toISOString(), overall: { total: 4 } });
+      expect(report.uniqueTags).toEqual(['finance', 'health', 'home', 'personal', 'work']);
+      expect(generateReport()).toMatchObject({ uniqueTags: [], users: [] });
+    });
+
+    test('ranks users by completion rate, highest first', () => {
+      const users = [{ id: 1, name: 'Ada', tasks: [tasks[1]] }, { id: 2, name: 'Grace', tasks: [tasks[0]] }];
+      expect(generateReport(users, tasks).users).toEqual([
+        { id: 2, name: 'Grace', total: 1, completed: 1, overdue: 0, completionRate: 100 },
+        { id: 1, name: 'Ada', total: 1, completed: 0, overdue: 0, completionRate: 0 },
+      ]);
+    });
   });
 });

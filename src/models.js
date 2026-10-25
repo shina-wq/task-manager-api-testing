@@ -61,9 +61,11 @@ export class PriorityTask extends Task {
   constructor({ priority = 'medium', dueDate = null, tags = [], ...task }) {
     super(task);
     if (!PRIORITIES.includes(priority)) throw new RangeError(`Invalid priority: ${priority}`);
+    if (!Array.isArray(tags)) throw new TypeError(`Tags must be an array: ${JSON.stringify(tags)}`);
 
     this.priority = priority;
     this.dueDate = dueDate ? new Date(dueDate) : null;
+    if (Number.isNaN(this.dueDate?.getTime())) throw new RangeError(`Invalid due date: ${dueDate}`);
     this.tags = [...new Set(tags)];
   }
 

@@ -16,6 +16,7 @@
       "<rootDir>/tests/**/*.test.js"
     ],
     "transform": {},
+    "clearMocks": true,
     "restoreMocks": true,
     "collectCoverageFrom": [
       "src/**/*.js"
