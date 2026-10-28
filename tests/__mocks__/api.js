@@ -50,7 +50,9 @@ export class APIError extends Error {
   constructor(message, { type, endpoint, status = null } = {}) {
     super(message);
     this.name = 'APIError';
-    Object.assign(this, { type, endpoint, status });
+    this.type = type;
+    this.endpoint = endpoint;
+    this.status = status;
   }
 }
 

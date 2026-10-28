@@ -262,21 +262,14 @@ describe('User', () => {
 });
 
 describe('method interactions (spies)', () => {
-  const spies = [];
-  const spyOn = (object, method) => {
-    const spy = jest.spyOn(object, method);
-    spies.push(spy);
-    return spy;
-  };
-
   afterEach(() => {
-    spies.splice(0).forEach((spy) => spy.mockRestore());
+    jest.restoreAllMocks();
   });
 
   test('PriorityTask.getStatus() checks isOverdue() before isUrgent(), passing the same date', () => {
     const task = new PriorityTask({ id: 1, title: 'Due soon', userId: 1, priority: 'high', dueDate: '2026-01-16' });
-    const isOverdue = spyOn(task, 'isOverdue');
-    const isUrgent = spyOn(task, 'isUrgent');
+    const isOverdue = jest.spyOn(task, 'isOverdue');
+    const isUrgent = jest.spyOn(task, 'isUrgent');
 
     expect(task.getStatus(NOW)).toBe('urgent');
     expect(isOverdue).toHaveBeenCalledWith(NOW);
@@ -286,8 +279,8 @@ describe('method interactions (spies)', () => {
 
   test('PriorityTask.getStatus() stops at isOverdue() for overdue tasks', () => {
     const task = new PriorityTask({ id: 1, title: 'Late', userId: 1, priority: 'high', dueDate: '2026-01-01' });
-    const isUrgent = spyOn(task, 'isUrgent');
-    const parentGetStatus = spyOn(Task.prototype, 'getStatus');
+    const isUrgent = jest.spyOn(task, 'isUrgent');
+    const parentGetStatus = jest.spyOn(Task.prototype, 'getStatus');
 
     expect(task.getStatus(NOW)).toBe('overdue');
     expect(isUrgent).not.toHaveBeenCalled();
@@ -295,15 +288,15 @@ describe('method interactions (spies)', () => {
   });
 
   test('PriorityTask.getStatus() delegates to Task.prototype.getStatus() via super', () => {
-    const parentGetStatus = spyOn(Task.prototype, 'getStatus');
+    const parentGetStatus = jest.spyOn(Task.prototype, 'getStatus');
     new PriorityTask({ id: 1, title: 'On time', userId: 1, dueDate: '2026-02-01' }).getStatus(NOW);
     expect(parentGetStatus).toHaveBeenCalledTimes(1);
   });
 
   test('fromAPI() validates through Task.parse() and derives fields through derive()', () => {
     const raw = { id: 1, title: 'From API', completed: false, userId: 2 };
-    const parse = spyOn(Task, 'parse');
-    const derive = spyOn(PriorityTask, 'derive');
+    const parse = jest.spyOn(Task, 'parse');
+    const derive = jest.spyOn(PriorityTask, 'derive');
 
     PriorityTask.fromAPI(raw, NOW);
     expect(parse).toHaveBeenCalledWith(raw);
@@ -312,7 +305,7 @@ describe('method interactions (spies)', () => {
 
   test('the User constructor adds initial tasks through addTask()', () => {
     const tasks = [new Task({ id: 1, title: 'A', userId: 1 }), new Task({ id: 2, title: 'B', userId: 1 })];
-    const addTask = spyOn(User.prototype, 'addTask');
+    const addTask = jest.spyOn(User.prototype, 'addTask');
 
     new User({ id: 1, name: 'Ada', email: 'a@b.c', tasks });
     expect(addTask).toHaveBeenCalledTimes(1);
@@ -322,7 +315,7 @@ describe('method interactions (spies)', () => {
   test('getTasksByStatus() asks every task for its status', () => {
     const tasks = [1, 2, 3].map((id) => new Task({ id, title: `T${id}`, userId: 1 }));
     const user = new User({ id: 1, name: 'Ada', email: 'a@b.c', tasks });
-    const hasStatus = spyOn(Task.prototype, 'hasStatus');
+    const hasStatus = jest.spyOn(Task.prototype, 'hasStatus');
 
     user.getTasksByStatus('completed');
     expect(hasStatus).toHaveBeenCalledTimes(3);

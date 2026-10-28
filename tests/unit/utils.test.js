@@ -175,8 +175,12 @@ describe('logger', () => {
   let spies;
 
   beforeEach(() => {
-    spies = Object.fromEntries(['log', 'warn', 'error', 'debug']
-      .map((method) => [method, jest.spyOn(console, method).mockImplementation(() => {})]));
+    spies = {
+      log: jest.spyOn(console, 'log').mockImplementation(() => {}),
+      warn: jest.spyOn(console, 'warn').mockImplementation(() => {}),
+      error: jest.spyOn(console, 'error').mockImplementation(() => {}),
+      debug: jest.spyOn(console, 'debug').mockImplementation(() => {}),
+    };
   });
 
   afterEach(() => {
